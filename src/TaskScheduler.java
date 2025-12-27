@@ -1,35 +1,42 @@
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.border.LineBorder;
 import javax.swing.border.TitledBorder;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.JTableHeader;
 import java.awt.*;
-import java.awt.event.ActionEvent;
+import java.awt.event.ItemEvent;
 import java.util.*;
 import java.util.List;
 
 /**
  * TaskScheduler.java
- * * A Java Swing GUI application that simulates CPU Scheduling Algorithms:
- * 1. First Come First Serve (FCFS)
- * 2. Round Robin (RR)
- * * Features:
- * - Input for Process ID, Arrival Time, Burst Time.
- * - Dynamic JTable for process data.
- * - Calculation of Turnaround Time, Waiting Time, and Throughput.
- * - Visual Gantt Chart.
- * - Custom Color Palette: #0F2854, #1C4D8D, #4988C4, #BDE8F5.
+ *
+ * Simulates CPU Scheduling (FCFS & Round Robin) using Java Swing.
+ *
+ * Updates:
+ * - Dark Theme using specific palette: #0F2854, #1C4D8D, #4988C4, #BDE8F5
+ * - Fixed window size (not resizable)
+ * - Increased Font Sizes
+ * - Integrated Quantum Input Field
  */
 public class TaskScheduler extends JFrame {
 
     // --- Color Palette ---
-    private static final Color COL_DARK_NAVY = Color.decode("#0F2854"); // Backgrounds / Text
-    private static final Color COL_MEDIUM_BLUE = Color.decode("#1C4D8D"); // Buttons / Headers
-    private static final Color COL_LIGHT_BLUE = Color.decode("#4988C4"); // Accents
-    private static final Color COL_PALE_BLUE = Color.decode("#BDE8F5"); // Fields / Table BG
+    private static final Color COL_BG_DARK    = Color.decode("#0F2854"); // Main Background
+    private static final Color COL_PANEL_BG   = Color.decode("#1C4D8D"); // Secondary Panels
+    private static final Color COL_ACCENT     = Color.decode("#4988C4"); // Borders / Buttons
+    private static final Color COL_TEXT_FIELD = Color.decode("#BDE8F5"); // Input Fields / Text Color
+    private static final Color COL_TEXT_WHITE = Color.WHITE;
+
+    // --- Fonts ---
+    private static final Font FONT_MAIN = new Font("Segoe UI", Font.PLAIN, 14);
+    private static final Font FONT_BOLD = new Font("Segoe UI", Font.BOLD, 14);
+    private static final Font FONT_HEADER = new Font("Segoe UI", Font.BOLD, 16);
 
     // --- Components ---
-    private JTextField tfProcessId, tfArrivalTime, tfBurstTime;
+    private JTextField tfProcessId, tfArrivalTime, tfBurstTime, tfQuantum;
     private JComboBox<String> cbAlgorithm;
     private JTable table;
     private DefaultTableModel tableModel;
@@ -40,11 +47,10 @@ public class TaskScheduler extends JFrame {
     private ArrayList<Process> processList = new ArrayList<>();
 
     public static void main(String[] args) {
-        // Ensure GUI is created on the Event Dispatch Thread
         SwingUtilities.invokeLater(() -> {
             try {
-                // Set system look and feel for better integration
-                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+                // Set cross-platform look and feel to ensure colors render correctly
+                UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -55,10 +61,13 @@ public class TaskScheduler extends JFrame {
     public TaskScheduler() {
         setTitle("CPU Task Scheduler");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(1000, 750);
+        setSize(1100, 800);
+        setResizable(false); // Requirement: Not resizable
         setLocationRelativeTo(null);
-        setLayout(new BorderLayout(10, 10));
-        getContentPane().setBackground(Color.WHITE);
+        setLayout(new BorderLayout(15, 15));
+
+        // Main Container Background
+        getContentPane().setBackground(COL_BG_DARK);
 
         // -- Initialize UI Parts --
         JPanel topPanel = createTopPanel();
@@ -75,24 +84,29 @@ public class TaskScheduler extends JFrame {
      */
     private JPanel createTopPanel() {
         JPanel panel = new JPanel(new GridLayout(1, 2, 20, 0));
-        panel.setBorder(new EmptyBorder(15, 15, 5, 15));
-        panel.setBackground(Color.WHITE);
+        panel.setBorder(new EmptyBorder(20, 20, 10, 20));
+        panel.setBackground(COL_BG_DARK);
 
         // 1. Left Side: Inputs
         JPanel inputPanel = new JPanel(new GridBagLayout());
-        inputPanel.setBackground(Color.WHITE);
-        inputPanel.setBorder(BorderFactory.createTitledBorder(
-                BorderFactory.createLineBorder(COL_LIGHT_BLUE), "Add Process", TitledBorder.LEFT, TitledBorder.TOP,
-                new Font("SansSerif", Font.BOLD, 12), COL_DARK_NAVY));
+        inputPanel.setBackground(COL_BG_DARK);
+
+        // Titled Border Styling
+        TitledBorder titledBorder = BorderFactory.createTitledBorder(
+                new LineBorder(COL_ACCENT, 2), " Add Process ", TitledBorder.LEFT, TitledBorder.TOP,
+                FONT_HEADER, COL_TEXT_FIELD);
+        inputPanel.setBorder(titledBorder);
 
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.insets = new Insets(10, 10, 10, 10);
         gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
 
         // Headers
-        gbc.gridy = 0; gbc.gridx = 0; inputPanel.add(new JLabel("Process ID"), gbc);
-        gbc.gridx = 1; inputPanel.add(new JLabel("Arrival Time"), gbc);
-        gbc.gridx = 2; inputPanel.add(new JLabel("Burst Time"), gbc);
+        gbc.gridy = 0;
+        gbc.gridx = 0; inputPanel.add(createLabel("Process ID"), gbc);
+        gbc.gridx = 1; inputPanel.add(createLabel("Arrival Time"), gbc);
+        gbc.gridx = 2; inputPanel.add(createLabel("Burst Time"), gbc);
 
         // Fields
         gbc.gridy = 1;
@@ -108,29 +122,58 @@ public class TaskScheduler extends JFrame {
 
         // 2. Right Side: Algorithm Select
         JPanel controlPanel = new JPanel(new GridBagLayout());
-        controlPanel.setBackground(Color.WHITE);
-        controlPanel.setBorder(BorderFactory.createLineBorder(COL_LIGHT_BLUE));
+        controlPanel.setBackground(COL_PANEL_BG); // Lighter Blue for contrast
+        controlPanel.setBorder(new LineBorder(COL_ACCENT, 2));
 
         GridBagConstraints cGbc = new GridBagConstraints();
-        cGbc.insets = new Insets(10, 10, 10, 10);
+        cGbc.insets = new Insets(10, 15, 10, 15);
         cGbc.fill = GridBagConstraints.HORIZONTAL;
         cGbc.weightx = 1.0;
 
-        JLabel lblSelect = new JLabel("Select Scheduling Method");
-        lblSelect.setForeground(COL_DARK_NAVY);
-        cGbc.gridx = 0; cGbc.gridy = 0;
-        controlPanel.add(lblSelect, cGbc);
+        // Label
+        cGbc.gridx = 0; cGbc.gridy = 0; cGbc.gridwidth = 2;
+        controlPanel.add(createLabel("Select Scheduling Method"), cGbc);
 
+        // Combo Box
         cbAlgorithm = new JComboBox<>(new String[]{"First Come First Served", "Round Robin"});
-        cbAlgorithm.setBackground(Color.WHITE);
+        cbAlgorithm.setFont(FONT_MAIN);
+        cbAlgorithm.setBackground(COL_TEXT_FIELD);
+
+        // Listener to enable/disable Quantum field
+        cbAlgorithm.addItemListener(e -> {
+            if (e.getStateChange() == ItemEvent.SELECTED) {
+                boolean isRR = "Round Robin".equals(e.getItem());
+                tfQuantum.setEnabled(isRR);
+                tfQuantum.setBackground(isRR ? COL_TEXT_FIELD : Color.GRAY);
+            }
+        });
         cGbc.gridy = 1;
         controlPanel.add(cbAlgorithm, cGbc);
 
+        // Quantum Input (Requirement: Integrated in frame)
+        JPanel quantumPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        quantumPanel.setBackground(COL_PANEL_BG);
+
+        JLabel lblQ = createLabel("Quantum: ");
+        lblQ.setBorder(new EmptyBorder(0,0,0,10));
+        quantumPanel.add(lblQ);
+
+        tfQuantum = createStyledTextField();
+        tfQuantum.setText("2");
+        tfQuantum.setColumns(5);
+        tfQuantum.setEnabled(false); // Disabled by default for FCFS
+        tfQuantum.setBackground(Color.GRAY);
+        quantumPanel.add(tfQuantum);
+
+        cGbc.gridy = 2;
+        controlPanel.add(quantumPanel, cGbc);
+
+        // Calculate Button
         JButton btnCalculate = createStyledButton("Calculate");
         btnCalculate.addActionListener(e -> calculateSchedule());
-        cGbc.gridy = 2;
+        cGbc.gridy = 3;
         cGbc.fill = GridBagConstraints.NONE;
-        cGbc.anchor = GridBagConstraints.WEST;
+        cGbc.anchor = GridBagConstraints.CENTER;
         controlPanel.add(btnCalculate, cGbc);
 
         panel.add(inputPanel);
@@ -144,8 +187,8 @@ public class TaskScheduler extends JFrame {
      */
     private JPanel createCenterPanel() {
         JPanel panel = new JPanel(new BorderLayout(15, 0));
-        panel.setBorder(new EmptyBorder(5, 15, 5, 15));
-        panel.setBackground(Color.WHITE);
+        panel.setBorder(new EmptyBorder(5, 20, 5, 20));
+        panel.setBackground(COL_BG_DARK);
 
         // 1. Table
         String[] columns = {"Process ID", "Arrival Time", "Burst Time", "Completed Time", "Waiting Time", "Turnaround Time"};
@@ -153,35 +196,50 @@ public class TaskScheduler extends JFrame {
         table = new JTable(tableModel);
 
         // Table Styling
+        table.setFont(FONT_MAIN);
         table.setFillsViewportHeight(true);
-        table.setRowHeight(25);
-        table.setGridColor(COL_LIGHT_BLUE);
-        table.getTableHeader().setBackground(COL_DARK_NAVY); // Header BG
-        table.getTableHeader().setForeground(Color.WHITE);   // Header Text
-        table.getTableHeader().setFont(new Font("SansSerif", Font.BOLD, 12));
-        table.setSelectionBackground(COL_BDE8F5());
+        table.setRowHeight(30); // Taller rows
+        table.setBackground(COL_TEXT_FIELD); // Pale Blue background
+        table.setForeground(COL_BG_DARK); // Dark text
+        table.setGridColor(COL_ACCENT);
+
+        JTableHeader header = table.getTableHeader();
+        header.setBackground(COL_PANEL_BG);
+        header.setForeground(COL_TEXT_WHITE);
+        header.setFont(FONT_BOLD);
+
+        // Center align table cells
+        DefaultTableCellRenderer centerRenderer = new DefaultTableCellRenderer();
+        centerRenderer.setHorizontalAlignment(JLabel.CENTER);
+        for(int i=0; i<table.getColumnCount(); i++){
+            table.getColumnModel().getColumn(i).setCellRenderer(centerRenderer);
+        }
 
         JScrollPane scrollPane = new JScrollPane(table);
-        scrollPane.setBorder(BorderFactory.createLineBorder(COL_LIGHT_BLUE));
+        scrollPane.setBorder(new LineBorder(COL_ACCENT, 2));
+        scrollPane.getViewport().setBackground(COL_BG_DARK);
 
         // 2. Stats Panel (Right side)
         JPanel statsPanel = new JPanel();
         statsPanel.setLayout(new BoxLayout(statsPanel, BoxLayout.Y_AXIS));
-        statsPanel.setBackground(Color.WHITE);
-        statsPanel.setBorder(BorderFactory.createLineBorder(COL_LIGHT_BLUE));
-        statsPanel.setPreferredSize(new Dimension(250, 0));
+        statsPanel.setBackground(COL_BG_DARK);
+        statsPanel.setBorder(new LineBorder(COL_ACCENT, 1));
+        statsPanel.setPreferredSize(new Dimension(280, 0));
 
-        statsPanel.add(Box.createVerticalStrut(10));
+        statsPanel.add(Box.createVerticalStrut(20));
+
         statsPanel.add(createStatBlock("Average Turnaround Time"));
         lblAvgTurnaround = createStatValueLabel();
         statsPanel.add(wrapInPanel(lblAvgTurnaround));
 
-        statsPanel.add(Box.createVerticalStrut(10));
+        statsPanel.add(Box.createVerticalStrut(20));
+
         statsPanel.add(createStatBlock("Average Waiting Time"));
         lblAvgWaiting = createStatValueLabel();
         statsPanel.add(wrapInPanel(lblAvgWaiting));
 
-        statsPanel.add(Box.createVerticalStrut(10));
+        statsPanel.add(Box.createVerticalStrut(20));
+
         statsPanel.add(createStatBlock("Throughput"));
         lblThroughput = createStatValueLabel();
         statsPanel.add(wrapInPanel(lblThroughput));
@@ -194,17 +252,18 @@ public class TaskScheduler extends JFrame {
 
     private JPanel createGanttSection() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(new EmptyBorder(5, 15, 15, 15));
-        panel.setBackground(Color.WHITE);
+        panel.setBorder(new EmptyBorder(5, 20, 20, 20));
+        panel.setBackground(COL_BG_DARK);
 
         JLabel title = new JLabel("Gantt Chart Visualization");
-        title.setFont(new Font("SansSerif", Font.BOLD, 14));
-        title.setForeground(COL_DARK_NAVY);
-        title.setBorder(new EmptyBorder(0, 0, 5, 0));
+        title.setFont(FONT_HEADER);
+        title.setForeground(COL_TEXT_FIELD);
+        title.setBorder(new EmptyBorder(0, 0, 10, 0));
 
         ganttPanel = new GanttPanel();
-        ganttPanel.setPreferredSize(new Dimension(0, 100));
-        ganttPanel.setBorder(BorderFactory.createLineBorder(COL_DARK_NAVY, 1));
+        ganttPanel.setPreferredSize(new Dimension(0, 120));
+        ganttPanel.setBorder(new LineBorder(COL_ACCENT, 2));
+        ganttPanel.setBackground(COL_PANEL_BG); // Darker background for chart area
 
         panel.add(title, BorderLayout.NORTH);
         panel.add(ganttPanel, BorderLayout.CENTER);
@@ -213,10 +272,20 @@ public class TaskScheduler extends JFrame {
 
     // --- Helpers for Styling ---
 
+    private JLabel createLabel(String text) {
+        JLabel lbl = new JLabel(text);
+        lbl.setForeground(COL_TEXT_WHITE);
+        lbl.setFont(FONT_BOLD);
+        return lbl;
+    }
+
     private JTextField createStyledTextField() {
-        JTextField tf = new JTextField(8);
+        JTextField tf = new JTextField(6);
+        tf.setBackground(COL_TEXT_FIELD); // Pale Blue
+        tf.setForeground(COL_BG_DARK); // Dark Text
+        tf.setFont(FONT_MAIN);
         tf.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(Color.LIGHT_GRAY),
+                new LineBorder(COL_ACCENT),
                 BorderFactory.createEmptyBorder(5, 5, 5, 5)
         ));
         return tf;
@@ -224,20 +293,22 @@ public class TaskScheduler extends JFrame {
 
     private JButton createStyledButton(String text) {
         JButton btn = new JButton(text);
-        btn.setBackground(COL_MEDIUM_BLUE); // 1C4D8D
-        btn.setForeground(Color.WHITE);
+        btn.setBackground(COL_ACCENT); // 4988C4
+        btn.setForeground(COL_BG_DARK);
         btn.setFocusPainted(false);
-        btn.setFont(new Font("SansSerif", Font.BOLD, 12));
+        btn.setFont(FONT_BOLD);
+        btn.setBorder(BorderFactory.createCompoundBorder(
+                new LineBorder(COL_TEXT_WHITE, 1),
+                new EmptyBorder(8, 15, 8, 15)
+        ));
         return btn;
     }
-
-    // Helper for pale blue color since it's used in method
-    private Color COL_BDE8F5() { return COL_PALE_BLUE; }
 
     private JLabel createStatBlock(String text) {
         JLabel lbl = new JLabel(text);
         lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
-        lbl.setForeground(COL_DARK_NAVY);
+        lbl.setForeground(COL_TEXT_FIELD);
+        lbl.setFont(FONT_BOLD);
         lbl.setBorder(new EmptyBorder(0, 10, 5, 0));
         return lbl;
     }
@@ -245,15 +316,17 @@ public class TaskScheduler extends JFrame {
     private JLabel createStatValueLabel() {
         JLabel lbl = new JLabel("0");
         lbl.setOpaque(true);
-        lbl.setBackground(COL_PALE_BLUE); // BDE8F5
+        lbl.setBackground(COL_TEXT_FIELD);
+        lbl.setForeground(COL_BG_DARK);
+        lbl.setFont(FONT_MAIN);
         lbl.setBorder(new EmptyBorder(10, 10, 10, 10));
-        lbl.setPreferredSize(new Dimension(200, 35));
+        lbl.setPreferredSize(new Dimension(230, 40));
         return lbl;
     }
 
     private JPanel wrapInPanel(JComponent c) {
         JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        p.setBackground(Color.WHITE);
+        p.setBackground(COL_BG_DARK);
         p.add(c);
         return p;
     }
@@ -263,10 +336,15 @@ public class TaskScheduler extends JFrame {
     private void addProcess() {
         try {
             String pid = tfProcessId.getText();
-            int arrival = Integer.parseInt(tfArrivalTime.getText());
-            int burst = Integer.parseInt(tfBurstTime.getText());
+            String arrText = tfArrivalTime.getText();
+            String burstText = tfBurstTime.getText();
 
-            if(pid.isEmpty()) throw new Exception("Empty ID");
+            if(pid.isEmpty() || arrText.isEmpty() || burstText.isEmpty()) {
+                throw new Exception("Empty Fields");
+            }
+
+            int arrival = Integer.parseInt(arrText);
+            int burst = Integer.parseInt(burstText);
 
             Process p = new Process(pid, arrival, burst);
             processList.add(p);
@@ -279,7 +357,7 @@ public class TaskScheduler extends JFrame {
             tfArrivalTime.setText("");
             tfBurstTime.setText("");
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "Invalid Input: Please check fields.", "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Invalid Input: Check fields.", "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -297,14 +375,13 @@ public class TaskScheduler extends JFrame {
         if ("First Come First Served".equals(algo)) {
             runFCFS(ganttData);
         } else {
-            // Ask for Quantum
-            String qStr = JOptionPane.showInputDialog(this, "Enter Time Quantum for Round Robin:");
-            if (qStr == null || qStr.isEmpty()) return;
+            // Get Quantum from integrated text field
             try {
-                int quantum = Integer.parseInt(qStr);
+                int quantum = Integer.parseInt(tfQuantum.getText());
+                if (quantum <= 0) throw new NumberFormatException();
                 runRoundRobin(quantum, ganttData);
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "Invalid Quantum.", "Error", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, "Invalid Time Quantum. Must be > 0", "Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
         }
@@ -314,13 +391,12 @@ public class TaskScheduler extends JFrame {
 
     // --- Algorithm: FCFS ---
     private void runFCFS(List<GanttBlock> ganttData) {
-        // Sort by Arrival Time
         processList.sort(Comparator.comparingInt(p -> p.arrivalTime));
 
         int currentTime = 0;
         for (Process p : processList) {
-            // CPU Idle check
             if (currentTime < p.arrivalTime) {
+                // Gap in gantt
                 currentTime = p.arrivalTime;
             }
 
@@ -338,22 +414,17 @@ public class TaskScheduler extends JFrame {
 
     // --- Algorithm: Round Robin ---
     private void runRoundRobin(int quantum, List<GanttBlock> ganttData) {
-        // Sort by Arrival Time first
         processList.sort(Comparator.comparingInt(p -> p.arrivalTime));
 
         int currentTime = 0;
         int completed = 0;
         int n = processList.size();
         Queue<Process> queue = new LinkedList<>();
-
-        // Track which processes have arrived
         int index = 0;
 
-        // Add initial process(es)
+        // Initial load
         if (!processList.isEmpty()) {
-            // Handle initial idle time if any
             if(processList.get(0).arrivalTime > 0) currentTime = processList.get(0).arrivalTime;
-
             while(index < n && processList.get(index).arrivalTime <= currentTime) {
                 queue.add(processList.get(index));
                 index++;
@@ -362,7 +433,6 @@ public class TaskScheduler extends JFrame {
 
         while (completed < n) {
             if (queue.isEmpty()) {
-                // If queue is empty but processes remain, jump time
                 if (index < n) {
                     currentTime = processList.get(index).arrivalTime;
                     while(index < n && processList.get(index).arrivalTime <= currentTime) {
@@ -382,10 +452,8 @@ public class TaskScheduler extends JFrame {
             currentTime += timeSlice;
             int end = currentTime;
 
-            // Add to Gantt
             ganttData.add(new GanttBlock(p.pid, start, end));
 
-            // Check for new arrivals during this time slice
             while(index < n && processList.get(index).arrivalTime <= currentTime) {
                 queue.add(processList.get(index));
                 index++;
@@ -394,7 +462,6 @@ public class TaskScheduler extends JFrame {
             if (p.remainingTime > 0) {
                 queue.add(p);
             } else {
-                // Process Finished
                 completed++;
                 p.completionTime = currentTime;
                 p.turnaroundTime = p.completionTime - p.arrivalTime;
@@ -404,7 +471,6 @@ public class TaskScheduler extends JFrame {
     }
 
     private void updateUIResults(List<GanttBlock> ganttData) {
-        // Update Table
         tableModel.setRowCount(0);
         double totalTurnaround = 0;
         double totalWaiting = 0;
@@ -419,7 +485,6 @@ public class TaskScheduler extends JFrame {
             maxCompletion = Math.max(maxCompletion, p.completionTime);
         }
 
-        // Update Stats
         double avgTurn = totalTurnaround / processList.size();
         double avgWait = totalWaiting / processList.size();
         double throughput = (double) processList.size() / maxCompletion;
@@ -428,18 +493,16 @@ public class TaskScheduler extends JFrame {
         lblAvgWaiting.setText(String.format("%.2f", avgWait));
         lblThroughput.setText(String.format("%.4f", throughput));
 
-        // Update Gantt
         ganttPanel.setData(ganttData, maxCompletion);
     }
 
     // --- Inner Classes ---
 
-    // Data Structure for Process
     class Process {
         String pid;
         int arrivalTime;
         int burstTime;
-        int remainingTime; // For RR
+        int remainingTime;
         int completionTime;
         int waitingTime;
         int turnaroundTime;
@@ -459,7 +522,6 @@ public class TaskScheduler extends JFrame {
         }
     }
 
-    // Data Structure for Gantt Chart Blocks
     class GanttBlock {
         String pid;
         int start;
@@ -472,7 +534,6 @@ public class TaskScheduler extends JFrame {
         }
     }
 
-    // Custom Component for Drawing Gantt Chart
     class GanttPanel extends JPanel {
         private List<GanttBlock> blocks;
         private int totalTime;
@@ -489,38 +550,40 @@ public class TaskScheduler extends JFrame {
             if (blocks == null || blocks.isEmpty()) return;
 
             Graphics2D g2 = (Graphics2D) g;
-            int width = getWidth() - 40;
-            int height = getHeight() - 40;
-            int startX = 20;
-            int startY = 20;
-            int barHeight = 40;
+            // Anti-aliasing for smoother text/shapes
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-            // Scale factor
+            int width = getWidth() - 40;
+            int startX = 20;
+            int startY = 30;
+            int barHeight = 50;
+
+            // Simple scaling
             double scale = (double) width / totalTime;
 
             for (GanttBlock block : blocks) {
                 int blockWidth = (int) ((block.end - block.start) * scale);
                 int xPos = startX + (int) (block.start * scale);
 
-                // Draw Block
-                g2.setColor(COL_LIGHT_BLUE);
+                // Draw Bar
+                g2.setColor(COL_ACCENT); // Light Blue Bars
                 g2.fillRect(xPos, startY, blockWidth, barHeight);
-                g2.setColor(COL_DARK_NAVY);
+                g2.setColor(COL_TEXT_WHITE);
                 g2.drawRect(xPos, startY, blockWidth, barHeight);
 
-                // Draw Text
-                g2.setColor(Color.WHITE);
+                // Draw Process ID inside
+                g2.setColor(COL_BG_DARK);
+                g2.setFont(FONT_BOLD);
                 FontMetrics fm = g2.getFontMetrics();
                 int textX = xPos + (blockWidth - fm.stringWidth(block.pid)) / 2;
-                int textY = startY + (barHeight + fm.getAscent()) / 2 - 2;
+                int textY = startY + (barHeight + fm.getAscent()) / 2 - 5;
                 g2.drawString(block.pid, textX, textY);
 
-                // Draw Time Labels (Start/End)
-                g2.setColor(Color.BLACK);
+                // Draw Time Markers
+                g2.setColor(COL_TEXT_WHITE); // White text for timeline
+                g2.setFont(new Font("Segoe UI", Font.PLAIN, 12));
                 g2.drawString(String.valueOf(block.start), xPos, startY + barHeight + 15);
-                // Only draw end time if it's the very last one or there is a gap, 
-                // usually simple scheduling just needs start time of next block, 
-                // but let's draw end time for the last block specifically.
+
                 if (block == blocks.get(blocks.size()-1)) {
                     g2.drawString(String.valueOf(block.end), xPos + blockWidth, startY + barHeight + 15);
                 }
