@@ -75,13 +75,11 @@ public class TaskScheduler extends JFrame {
     private final Color PANEL_COLOR = new Color(45, 45, 45);
     private final Color TEXT_COLOR = new Color(230, 230, 230);
 
-    // REVERTED: Standard Fonts
     private final Font MAIN_FONT = new Font("Segoe UI", Font.PLAIN, 16);
     private final Font HEADER_FONT = new Font("Segoe UI", Font.BOLD, 16);
 
     public TaskScheduler() {
-        setTitle("CPU Scheduler Simulator - Real Time");
-        // REVERTED: Fixed Size
+        setTitle("CPU Scheduler Simulator");
         setSize(1100, 850);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setResizable(false);
