@@ -56,7 +56,9 @@ public class TaskScheduler extends JFrame {
     private DefaultTableModel tableModel;
     private JTable processTable;
     private GanttPanel ganttPanel;
-    private JButton btnRun, btnStop, btnReset; // Controls
+
+    // Buttons
+    private JButton btnAdd, btnRandom, btnRun, btnStop, btnReset;
 
     // --- State ---
     private ArrayList<Process> processList = new ArrayList<>();
@@ -72,11 +74,14 @@ public class TaskScheduler extends JFrame {
     private final Color BG_COLOR = new Color(30, 30, 30);
     private final Color PANEL_COLOR = new Color(45, 45, 45);
     private final Color TEXT_COLOR = new Color(230, 230, 230);
+
+    // REVERTED: Standard Fonts
     private final Font MAIN_FONT = new Font("Segoe UI", Font.PLAIN, 16);
     private final Font HEADER_FONT = new Font("Segoe UI", Font.BOLD, 16);
 
     public TaskScheduler() {
-        setTitle("CPU Scheduler Simulator");
+        setTitle("CPU Scheduler Simulator - Real Time");
+        // REVERTED: Fixed Size
         setSize(1100, 850);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setResizable(false);
@@ -113,10 +118,10 @@ public class TaskScheduler extends JFrame {
         txtAt = styleTextField(new JTextField(6));
         txtBt = styleTextField(new JTextField(6));
 
-        JButton btnAdd = styleButton("Add Process");
+        btnAdd = styleButton("Add Process");
         btnAdd.addActionListener(e -> addProcess());
 
-        JButton btnRandom = styleButton("Randomize Inputs");
+        btnRandom = styleButton("Randomize Inputs");
         btnRandom.setBackground(new Color(180, 100, 50));
         btnRandom.addActionListener(e -> randomizeProcesses());
 
@@ -162,8 +167,8 @@ public class TaskScheduler extends JFrame {
         btnRun.addActionListener(e -> startSimulation());
 
         btnStop = styleButton("Stop");
-        btnStop.setBackground(new Color(200, 100, 0)); // Orange-ish
-        btnStop.setEnabled(false); // Disabled initially
+        btnStop.setBackground(new Color(200, 100, 0));
+        btnStop.setEnabled(false);
         btnStop.addActionListener(e -> stopSimulation());
 
         btnReset = styleButton("Reset");
@@ -176,7 +181,7 @@ public class TaskScheduler extends JFrame {
         panel.add(txtQuantum);
         panel.add(Box.createHorizontalStrut(20));
         panel.add(btnRun);
-        panel.add(btnStop); // Added Stop Button
+        panel.add(btnStop);
         panel.add(btnReset);
 
         return panel;
@@ -220,7 +225,6 @@ public class TaskScheduler extends JFrame {
     // --- Logic & Simulation ---
 
     private Color generateRandomColor() {
-        // Generates bright, distinct colors (High Saturation, High Brightness)
         float hue = (float) Math.random();
         return Color.getHSBColor(hue, 0.75f, 0.9f);
     }
@@ -231,7 +235,11 @@ public class TaskScheduler extends JFrame {
             int at = Integer.parseInt(txtAt.getText());
             int bt = Integer.parseInt(txtBt.getText());
 
-            // Random Color automatically assigned
+            if (bt <= 0) {
+                JOptionPane.showMessageDialog(this, "Burst Time must be > 0");
+                return;
+            }
+
             processList.add(new Process(pid, at, bt, generateRandomColor()));
             updateTableData();
 
@@ -247,7 +255,6 @@ public class TaskScheduler extends JFrame {
 
     private void randomizeProcesses() {
         if(processList.isEmpty()) {
-            // If empty, create 5 random processes
             for(int i=0; i<5; i++) {
                 processList.add(new Process("P"+(processCounter++), 0, 0, generateRandomColor()));
             }
@@ -257,11 +264,10 @@ public class TaskScheduler extends JFrame {
         for(Process p : processList) {
             p.arrivalTime = rand.nextInt(10);
             p.burstTime = rand.nextInt(10) + 1;
-            // Re-randomize color for fresh look
             p.color = generateRandomColor();
         }
         updateTableData();
-        txtPid.setText("P" + processCounter); // Update counter display
+        txtPid.setText("P" + processCounter);
     }
 
     private void updateTableData() {
@@ -272,7 +278,7 @@ public class TaskScheduler extends JFrame {
                     p.color,
                     p.arrivalTime,
                     p.burstTime,
-                    0,
+                    p.executedTime,
                     "-", "-", "-"
             });
         }
@@ -287,6 +293,7 @@ public class TaskScheduler extends JFrame {
         processCounter = 1;
         txtPid.setText("P1");
         ganttPanel.repaint();
+        toggleInputControls(true);
     }
 
     // --- ANIMATION CONTROLS ---
@@ -298,7 +305,7 @@ public class TaskScheduler extends JFrame {
         for(Process p : processList) p.reset();
         simulationTimeline.clear();
         currentSimTime = 0;
-        updateTableData(); // clear old results from table
+        updateTableData();
 
         // 2. Pre-calculate Logic
         ArrayList<Process> sortedList = new ArrayList<>(processList);
@@ -321,10 +328,10 @@ public class TaskScheduler extends JFrame {
 
         if(animationTimer != null && animationTimer.isRunning()) animationTimer.stop();
 
-        btnRun.setEnabled(false);
+        toggleInputControls(false); // LOCK UI
         btnStop.setEnabled(true);
 
-        animationTimer = new Timer(500, e -> {
+        animationTimer = new Timer(300, e -> {
             if (currentSimTime < totalSimTime) {
                 stepAnimation();
             } else {
@@ -339,8 +346,21 @@ public class TaskScheduler extends JFrame {
         if(animationTimer != null) {
             animationTimer.stop();
         }
-        btnRun.setEnabled(true);
+        toggleInputControls(true); // UNLOCK UI
         btnStop.setEnabled(false);
+    }
+
+    private void toggleInputControls(boolean enable) {
+        btnAdd.setEnabled(enable);
+        btnRandom.setEnabled(enable);
+        btnReset.setEnabled(enable);
+        btnRun.setEnabled(enable);
+
+        txtPid.setEnabled(enable);
+        txtAt.setEnabled(enable);
+        txtBt.setEnabled(enable);
+        txtQuantum.setEnabled(enable);
+        algoSelector.setEnabled(enable);
     }
 
     private void stepAnimation() {
@@ -363,10 +383,15 @@ public class TaskScheduler extends JFrame {
     private void finalizeTable() {
         for (int i=0; i<processList.size(); i++) {
             Process p = processList.get(i);
+            p.executedTime = p.burstTime;
+
+            tableModel.setValueAt(p.executedTime, i, 4);
             tableModel.setValueAt(p.completionTime, i, 5);
             tableModel.setValueAt(p.turnAroundTime, i, 6);
             tableModel.setValueAt(p.waitingTime, i, 7);
         }
+        tableModel.fireTableDataChanged();
+        processTable.repaint();
     }
 
     // --- Logic Generators ---
@@ -464,12 +489,19 @@ public class TaskScheduler extends JFrame {
 
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+            if (value == null) return this;
+
             int executed = (int) value;
             Process p = processList.get(row);
             int total = p.burstTime;
+
             setValue(executed);
             setMaximum(total);
             setString(executed + " / " + total);
+
+            if (executed >= total) {
+                setValue(total);
+            }
             return this;
         }
     }
