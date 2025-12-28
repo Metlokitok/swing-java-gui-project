@@ -3,8 +3,7 @@ import javax.swing.table.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.*;
-import java.util.List;
-import javax.swing.Timer; // Explicit import to avoid conflict
+import javax.swing.Timer;
 
 public class TaskScheduler extends JFrame {
 
@@ -29,7 +28,6 @@ public class TaskScheduler extends JFrame {
             this.color = c;
         }
 
-        // Reset state for re-simulation
         public void reset() {
             this.remainingTime = burstTime;
             this.executedTime = 0;
@@ -39,10 +37,9 @@ public class TaskScheduler extends JFrame {
         }
     }
 
-    // Represents a slice of execution for playback
     static class ExecutionStep {
         String pid;
-        int time; // The specific second this step represents
+        int time;
         Color color;
 
         public ExecutionStep(String pid, int time, Color color) {
@@ -59,12 +56,11 @@ public class TaskScheduler extends JFrame {
     private DefaultTableModel tableModel;
     private JTable processTable;
     private GanttPanel ganttPanel;
-    private JButton btnColorPick;
+    private JButton btnRun, btnStop, btnReset; // Controls
 
     // --- State ---
     private ArrayList<Process> processList = new ArrayList<>();
     private ArrayList<ExecutionStep> simulationTimeline = new ArrayList<>();
-    private Color nextColor = new Color(70, 130, 180); // Default Steel Blue
     private int processCounter = 1;
 
     // --- Animation State ---
@@ -80,7 +76,7 @@ public class TaskScheduler extends JFrame {
     private final Font HEADER_FONT = new Font("Segoe UI", Font.BOLD, 16);
 
     public TaskScheduler() {
-        setTitle("CPU Scheduler Simulator - Real Time");
+        setTitle("CPU Scheduler Simulator");
         setSize(1100, 850);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setResizable(false);
@@ -117,20 +113,6 @@ public class TaskScheduler extends JFrame {
         txtAt = styleTextField(new JTextField(6));
         txtBt = styleTextField(new JTextField(6));
 
-        // Color Picker Button
-        btnColorPick = new JButton(" ");
-        btnColorPick.setBackground(nextColor);
-        btnColorPick.setPreferredSize(new Dimension(30, 30));
-        btnColorPick.setBorder(BorderFactory.createLineBorder(Color.WHITE));
-        btnColorPick.setToolTipText("Choose Process Color");
-        btnColorPick.addActionListener(e -> {
-            Color c = JColorChooser.showDialog(this, "Choose Process Color", nextColor);
-            if(c != null) {
-                nextColor = c;
-                btnColorPick.setBackground(c);
-            }
-        });
-
         JButton btnAdd = styleButton("Add Process");
         btnAdd.addActionListener(e -> addProcess());
 
@@ -144,8 +126,6 @@ public class TaskScheduler extends JFrame {
         panel.add(txtAt);
         panel.add(styleLabel("Burst:"));
         panel.add(txtBt);
-        panel.add(styleLabel("Color:"));
-        panel.add(btnColorPick);
         panel.add(Box.createHorizontalStrut(10));
         panel.add(btnAdd);
         panel.add(btnRandom);
@@ -176,11 +156,17 @@ public class TaskScheduler extends JFrame {
             panel.repaint();
         });
 
-        JButton btnRun = styleButton("Simulate (Animate)");
+        // Controls
+        btnRun = styleButton("Simulate");
         btnRun.setBackground(new Color(0, 150, 0));
         btnRun.addActionListener(e -> startSimulation());
 
-        JButton btnReset = styleButton("Reset");
+        btnStop = styleButton("Stop");
+        btnStop.setBackground(new Color(200, 100, 0)); // Orange-ish
+        btnStop.setEnabled(false); // Disabled initially
+        btnStop.addActionListener(e -> stopSimulation());
+
+        btnReset = styleButton("Reset");
         btnReset.setBackground(new Color(150, 50, 50));
         btnReset.addActionListener(e -> reset());
 
@@ -190,13 +176,13 @@ public class TaskScheduler extends JFrame {
         panel.add(txtQuantum);
         panel.add(Box.createHorizontalStrut(20));
         panel.add(btnRun);
+        panel.add(btnStop); // Added Stop Button
         panel.add(btnReset);
 
         return panel;
     }
 
     private void createTable() {
-        // Added "Progress" column
         String[] cols = {"PID", "Color", "Arrival", "Burst", "Progress", "Finish", "Turnaround", "Waiting"};
 
         tableModel = new DefaultTableModel(cols, 0) {
@@ -228,11 +214,16 @@ public class TaskScheduler extends JFrame {
             processTable.getColumnModel().getColumn(i).setCellRenderer(centerRenderer);
         }
 
-        // Hide Color column text, just show box
         processTable.getColumnModel().getColumn(1).setMaxWidth(50);
     }
 
     // --- Logic & Simulation ---
+
+    private Color generateRandomColor() {
+        // Generates bright, distinct colors (High Saturation, High Brightness)
+        float hue = (float) Math.random();
+        return Color.getHSBColor(hue, 0.75f, 0.9f);
+    }
 
     private void addProcess() {
         try {
@@ -240,7 +231,8 @@ public class TaskScheduler extends JFrame {
             int at = Integer.parseInt(txtAt.getText());
             int bt = Integer.parseInt(txtBt.getText());
 
-            processList.add(new Process(pid, at, bt, nextColor));
+            // Random Color automatically assigned
+            processList.add(new Process(pid, at, bt, generateRandomColor()));
             updateTableData();
 
             processCounter++;
@@ -254,14 +246,22 @@ public class TaskScheduler extends JFrame {
     }
 
     private void randomizeProcesses() {
-        if(processList.isEmpty()) return;
+        if(processList.isEmpty()) {
+            // If empty, create 5 random processes
+            for(int i=0; i<5; i++) {
+                processList.add(new Process("P"+(processCounter++), 0, 0, generateRandomColor()));
+            }
+        }
+
         Random rand = new Random();
         for(Process p : processList) {
-            p.arrivalTime = rand.nextInt(10); // 0 to 9
-            p.burstTime = rand.nextInt(15) + 1; // 1 to 15
+            p.arrivalTime = rand.nextInt(10);
+            p.burstTime = rand.nextInt(10) + 1;
+            // Re-randomize color for fresh look
+            p.color = generateRandomColor();
         }
         updateTableData();
-        JOptionPane.showMessageDialog(this, "Processes randomized! Click Simulate to run.");
+        txtPid.setText("P" + processCounter); // Update counter display
     }
 
     private void updateTableData() {
@@ -272,14 +272,14 @@ public class TaskScheduler extends JFrame {
                     p.color,
                     p.arrivalTime,
                     p.burstTime,
-                    0, // Initial progress
+                    0,
                     "-", "-", "-"
             });
         }
     }
 
     private void reset() {
-        if(animationTimer != null && animationTimer.isRunning()) animationTimer.stop();
+        stopSimulation();
         processList.clear();
         simulationTimeline.clear();
         tableModel.setRowCount(0);
@@ -289,7 +289,7 @@ public class TaskScheduler extends JFrame {
         ganttPanel.repaint();
     }
 
-    // --- PRE-CALCULATION & ANIMATION ---
+    // --- ANIMATION CONTROLS ---
 
     private void startSimulation() {
         if (processList.isEmpty()) return;
@@ -298,9 +298,9 @@ public class TaskScheduler extends JFrame {
         for(Process p : processList) p.reset();
         simulationTimeline.clear();
         currentSimTime = 0;
+        updateTableData(); // clear old results from table
 
-        // 2. Pre-calculate Logic (Generate the timeline)
-        // Sort by Arrival Time
+        // 2. Pre-calculate Logic
         ArrayList<Process> sortedList = new ArrayList<>(processList);
         sortedList.sort(Comparator.comparingInt(p -> p.arrivalTime));
 
@@ -316,45 +316,51 @@ public class TaskScheduler extends JFrame {
             }
         }
 
-        // 3. Start Animation Timer
+        // 3. Start Animation
         totalSimTime = simulationTimeline.size();
 
         if(animationTimer != null && animationTimer.isRunning()) animationTimer.stop();
 
-        animationTimer = new Timer(500, e -> { // 500ms delay per second of simulation
+        btnRun.setEnabled(false);
+        btnStop.setEnabled(true);
+
+        animationTimer = new Timer(500, e -> {
             if (currentSimTime < totalSimTime) {
                 stepAnimation();
             } else {
-                ((Timer)e.getSource()).stop();
-                finalizeTable(); // Fill in wait/turnaround times
+                stopSimulation();
+                finalizeTable();
             }
         });
         animationTimer.start();
+    }
+
+    private void stopSimulation() {
+        if(animationTimer != null) {
+            animationTimer.stop();
+        }
+        btnRun.setEnabled(true);
+        btnStop.setEnabled(false);
     }
 
     private void stepAnimation() {
         ExecutionStep step = simulationTimeline.get(currentSimTime);
         currentSimTime++;
 
-        // Update Progress Bars
         if (!step.pid.equals("IDLE")) {
             for (int i = 0; i < processList.size(); i++) {
                 Process p = processList.get(i);
                 if (p.pid.equals(step.pid)) {
                     p.executedTime++;
-                    // Update Table Progress directly
-                    tableModel.setValueAt(p.executedTime, i, 4); // Column 4 is Progress
+                    tableModel.setValueAt(p.executedTime, i, 4);
                     break;
                 }
             }
         }
-
-        // Repaint Gantt
         ganttPanel.repaint();
     }
 
     private void finalizeTable() {
-        // Calculate final stats based on completion times found in logic
         for (int i=0; i<processList.size(); i++) {
             Process p = processList.get(i);
             tableModel.setValueAt(p.completionTime, i, 5);
@@ -363,17 +369,15 @@ public class TaskScheduler extends JFrame {
         }
     }
 
-    // --- Logic Generators (Populate simulationTimeline) ---
+    // --- Logic Generators ---
 
     private void calculateFCFS(ArrayList<Process> sortedList) {
         int time = 0;
         for (Process p : sortedList) {
-            // Idle handling
             while (time < p.arrivalTime) {
                 simulationTimeline.add(new ExecutionStep("IDLE", time, Color.GRAY));
                 time++;
             }
-            // Execution
             for (int i = 0; i < p.burstTime; i++) {
                 simulationTimeline.add(new ExecutionStep(p.pid, time, p.color));
                 time++;
@@ -391,7 +395,6 @@ public class TaskScheduler extends JFrame {
         Queue<Process> queue = new LinkedList<>();
         Set<Process> inQueue = new HashSet<>();
 
-        // Add processes arriving at 0
         int i = 0;
         while(i < n && sortedList.get(i).arrivalTime <= time) {
             queue.add(sortedList.get(i));
@@ -399,12 +402,10 @@ public class TaskScheduler extends JFrame {
             i++;
         }
 
-        // To detect idle time if queue is empty but not finished
         while(completed < n) {
             if(queue.isEmpty()) {
                 simulationTimeline.add(new ExecutionStep("IDLE", time, Color.GRAY));
                 time++;
-                // Check if new process arrived during idle
                 while(i < n && sortedList.get(i).arrivalTime <= time) {
                     queue.add(sortedList.get(i));
                     inQueue.add(sortedList.get(i));
@@ -421,8 +422,6 @@ public class TaskScheduler extends JFrame {
                 simulationTimeline.add(new ExecutionStep(p.pid, time, p.color));
                 time++;
                 p.remainingTime--;
-
-                // Add arrivals during this second
                 while(i < n && sortedList.get(i).arrivalTime <= time) {
                     if(!inQueue.contains(sortedList.get(i)) && sortedList.get(i).remainingTime > 0){
                         queue.add(sortedList.get(i));
@@ -522,24 +521,20 @@ public class TaskScheduler extends JFrame {
             int y = 60;
             int h = 50;
 
-            // Dynamic scale: Width adjusts based on total time, not current time
             int panelWidth = getWidth() - 50;
             double scale = (double) panelWidth / (simulationTimeline.size() + 2);
 
-            // Draw valid steps up to currentSimTime
             for (int i = 0; i < currentSimTime; i++) {
                 ExecutionStep step = simulationTimeline.get(i);
 
                 int x = startX + (int) (i * scale);
-                int width = (int) scale + 1; // +1 to close gaps
+                int width = (int) scale + 1;
 
                 g2.setColor(step.color);
                 g2.fillRect(x, y, width, h);
-                g2.setColor(BG_COLOR); // Grid lines
+                g2.setColor(BG_COLOR);
                 g2.drawRect(x, y, width, h);
 
-                // Draw PID occasionally (to avoid clutter) or at center of blocks
-                // Simple logic: Draw PID if previous step was different
                 if (!step.pid.equals("IDLE")) {
                     boolean isStartOfBlock = (i == 0) || !simulationTimeline.get(i-1).pid.equals(step.pid);
                     if (isStartOfBlock) {
@@ -549,7 +544,6 @@ public class TaskScheduler extends JFrame {
                 }
             }
 
-            // Draw Timeline Ruler
             g2.setColor(Color.GRAY);
             g2.drawLine(startX, y+h+5, startX + (int)(simulationTimeline.size()*scale), y+h+5);
             g2.drawString("0", startX, y+h+20);
