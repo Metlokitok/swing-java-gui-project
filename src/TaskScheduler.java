@@ -1,511 +1,589 @@
 import javax.swing.*;
-import javax.swing.border.Border;
-import javax.swing.border.CompoundBorder;
-import javax.swing.border.EmptyBorder;
-import javax.swing.border.LineBorder;
-import javax.swing.table.DefaultTableCellRenderer;
-import javax.swing.table.DefaultTableModel;
-import javax.swing.table.JTableHeader;
+import javax.swing.table.*;
 import java.awt.*;
-import java.awt.event.ItemEvent;
+import java.awt.event.*;
 import java.util.*;
-import java.util.List;
+import javax.swing.Timer;
 
-/**
- * TaskScheduler.java
- *
- * A CPU Scheduling Simulator (FCFS & Round Robin).
- *
- * Design Updates:
- * - Monochrome & Minimalist Aesthetic (Black/White/Gray).
- * - Dynamic UI: Quantum input completely disappears for FCFS.
- * - Enhanced Gantt Chart: Detailed timeline markers for all transitions.
- */
 public class TaskScheduler extends JFrame {
 
-    // --- Monochrome Palette ---
-    private static final Color COL_BG = Color.WHITE;
-    private static final Color COL_FG = Color.BLACK;
-    private static final Color COL_ACCENT = new Color(80, 80, 80); // Dark Gray for highlights
-    private static final Color COL_LIGHT_GRAY = new Color(240, 240, 240); // Table headers/fields
-    private static final Color COL_BORDER = Color.LIGHT_GRAY;
+    // --- Data Structures ---
+    static class Process {
+        String pid;
+        int arrivalTime;
+        int burstTime;
+        int remainingTime;
+        int executedTime; // For progress bar tracking
+        int completionTime;
+        int turnAroundTime;
+        int waitingTime;
+        Color color;
 
-    // --- Fonts ---
-    private static final Font FONT_UI = new Font("Segoe UI", Font.PLAIN, 13);
-    private static final Font FONT_BOLD = new Font("Segoe UI", Font.BOLD, 13);
-    private static final Font FONT_TITLE = new Font("Segoe UI", Font.BOLD, 16);
+        public Process(String pid, int at, int bt, Color c) {
+            this.pid = pid;
+            this.arrivalTime = at;
+            this.burstTime = bt;
+            this.remainingTime = bt;
+            this.executedTime = 0;
+            this.color = c;
+        }
 
-    // --- Components ---
-    private JTextField tfProcessId, tfArrivalTime, tfBurstTime, tfQuantum;
-    private JComboBox<String> cbAlgorithm;
-    private JPanel quantumPanel; // Container to hide/show quantum input
-    private JTable table;
-    private DefaultTableModel tableModel;
-    private JLabel lblAvgTurnaround, lblAvgWaiting, lblThroughput;
-    private GanttPanel ganttPanel;
-
-    // --- Data ---
-    private ArrayList<Process> processList = new ArrayList<>();
-
-    public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> {
-            try {
-                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-                // Force basic colors for a consistent monochrome look across platforms
-                UIManager.put("Panel.background", Color.WHITE);
-                UIManager.put("OptionPane.background", Color.WHITE);
-                UIManager.put("OptionPane.messageForeground", Color.BLACK);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-            new TaskScheduler().setVisible(true);
-        });
+        public void reset() {
+            this.remainingTime = burstTime;
+            this.executedTime = 0;
+            this.completionTime = 0;
+            this.turnAroundTime = 0;
+            this.waitingTime = 0;
+        }
     }
 
-    public TaskScheduler() {
-        setTitle("CPU Scheduler");
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(1000, 750);
-        setResizable(false);
-        setLocationRelativeTo(null);
-        setLayout(new BorderLayout(0, 0));
-        getContentPane().setBackground(COL_BG);
+    static class ExecutionStep {
+        String pid;
+        int time;
+        Color color;
 
-        // -- Layout Structure --
+        public ExecutionStep(String pid, int time, Color color) {
+            this.pid = pid;
+            this.time = time;
+            this.color = color;
+        }
+    }
+
+    // --- UI Components ---
+    private JComboBox<String> algoSelector;
+    private JTextField txtPid, txtAt, txtBt, txtQuantum;
+    private JLabel lblQuantum;
+    private DefaultTableModel tableModel;
+    private JTable processTable;
+    private GanttPanel ganttPanel;
+
+    // Buttons
+    private JButton btnAdd, btnRandom, btnRun, btnStop, btnReset;
+
+    // --- State ---
+    private ArrayList<Process> processList = new ArrayList<>();
+    private ArrayList<ExecutionStep> simulationTimeline = new ArrayList<>();
+    private int processCounter = 1;
+
+    // --- Animation State ---
+    private Timer animationTimer;
+    private int currentSimTime = 0;
+    private int totalSimTime = 0;
+
+    // --- Colors & Fonts ---
+    private final Color BG_COLOR = new Color(30, 30, 30);
+    private final Color PANEL_COLOR = new Color(45, 45, 45);
+    private final Color TEXT_COLOR = new Color(230, 230, 230);
+
+    private final Font MAIN_FONT = new Font("Segoe UI", Font.PLAIN, 16);
+    private final Font HEADER_FONT = new Font("Segoe UI", Font.BOLD, 16);
+
+    public TaskScheduler() {
+        setTitle("CPU Scheduler Simulator");
+        setSize(1100, 850);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setResizable(false);
+        setLayout(new BorderLayout());
+        getContentPane().setBackground(BG_COLOR);
+
         add(createTopPanel(), BorderLayout.NORTH);
-        add(createCenterPanel(), BorderLayout.CENTER);
+
+        JPanel centerPanel = new JPanel(new GridLayout(2, 1));
+        centerPanel.setBackground(BG_COLOR);
+
+        createTable();
+        JScrollPane tableScroll = new JScrollPane(processTable);
+        tableScroll.getViewport().setBackground(PANEL_COLOR);
+        tableScroll.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        centerPanel.add(tableScroll);
+
+        ganttPanel = new GanttPanel();
+        centerPanel.add(ganttPanel);
+
+        add(centerPanel, BorderLayout.CENTER);
         add(createBottomPanel(), BorderLayout.SOUTH);
+
+        setLocationRelativeTo(null);
     }
 
     private JPanel createTopPanel() {
-        JPanel mainPanel = new JPanel(new GridLayout(1, 2, 30, 0));
-        mainPanel.setBackground(COL_BG);
-        mainPanel.setBorder(new EmptyBorder(25, 25, 10, 25));
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 20));
+        panel.setBackground(BG_COLOR);
+        panel.setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(TEXT_COLOR), "Input", 0, 0, HEADER_FONT, TEXT_COLOR));
 
-        // --- Left: Input Section ---
-        JPanel inputSection = new JPanel(new BorderLayout(0, 10));
-        inputSection.setBackground(COL_BG);
+        txtPid = styleTextField(new JTextField("P1", 6));
+        txtAt = styleTextField(new JTextField(6));
+        txtBt = styleTextField(new JTextField(6));
 
-        JLabel inputTitle = new JLabel("Add Process");
-        inputTitle.setFont(FONT_TITLE);
-        inputSection.add(inputTitle, BorderLayout.NORTH);
-
-        JPanel inputFields = new JPanel(new GridLayout(2, 3, 10, 10));
-        inputFields.setBackground(COL_BG);
-
-        // Labels
-        inputFields.add(new JLabel("Process ID"));
-        inputFields.add(new JLabel("Arrival Time"));
-        inputFields.add(new JLabel("Burst Time"));
-
-        // Fields
-        tfProcessId = createFlatField();
-        tfArrivalTime = createFlatField();
-        tfBurstTime = createFlatField();
-
-        inputFields.add(tfProcessId);
-        inputFields.add(tfArrivalTime);
-        inputFields.add(tfBurstTime);
-        inputSection.add(inputFields, BorderLayout.CENTER);
-
-        JButton btnAdd = createDarkButton("Add Process");
+        btnAdd = styleButton("Add Process");
         btnAdd.addActionListener(e -> addProcess());
-        JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 10));
-        btnPanel.setBackground(COL_BG);
-        btnPanel.add(btnAdd);
-        inputSection.add(btnPanel, BorderLayout.SOUTH);
 
-        // --- Right: Control Section ---
-        JPanel controlSection = new JPanel(new GridBagLayout());
-        controlSection.setBackground(COL_BG);
-        controlSection.setBorder(BorderFactory.createCompoundBorder(
-                new LineBorder(COL_BORDER),
-                new EmptyBorder(15, 15, 15, 15)
-        ));
+        btnRandom = styleButton("Randomize Inputs");
+        btnRandom.setBackground(new Color(180, 100, 50));
+        btnRandom.addActionListener(e -> randomizeProcesses());
 
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.weightx = 1.0;
-        gbc.insets = new Insets(0, 0, 10, 0);
-        gbc.gridx = 0; gbc.gridy = 0;
-
-        controlSection.add(new JLabel("Scheduling Method:"), gbc);
-
-        cbAlgorithm = new JComboBox<>(new String[]{"First Come First Served", "Round Robin"});
-        cbAlgorithm.setFont(FONT_UI);
-        cbAlgorithm.setFocusable(false);
-        cbAlgorithm.setBackground(Color.WHITE);
-
-        gbc.gridy = 1;
-        controlSection.add(cbAlgorithm, gbc);
-
-        // Quantum Field (Hidden by default)
-        quantumPanel = new JPanel(new BorderLayout(5, 0));
-        quantumPanel.setBackground(COL_BG);
-        quantumPanel.setVisible(false); // Initially hidden for FCFS
-
-        JLabel lblQ = new JLabel("Time Quantum:");
-        tfQuantum = createFlatField();
-        tfQuantum.setText("2");
-
-        quantumPanel.add(lblQ, BorderLayout.WEST);
-        quantumPanel.add(tfQuantum, BorderLayout.CENTER);
-
-        gbc.gridy = 2;
-        controlSection.add(quantumPanel, gbc);
-
-        // Toggle Logic
-        cbAlgorithm.addItemListener(e -> {
-            if (e.getStateChange() == ItemEvent.SELECTED) {
-                boolean isRR = "Round Robin".equals(e.getItem());
-                quantumPanel.setVisible(isRR);
-                controlSection.revalidate(); // Refresh layout to hide/show gap
-                controlSection.repaint();
-            }
-        });
-
-        JButton btnCalculate = createDarkButton("Calculate Schedule");
-        btnCalculate.addActionListener(e -> calculateSchedule());
-
-        gbc.gridy = 3;
-        gbc.weighty = 1.0; // Push button to bottom
-        gbc.anchor = GridBagConstraints.SOUTH;
-        controlSection.add(btnCalculate, gbc);
-
-        mainPanel.add(inputSection);
-        mainPanel.add(controlSection);
-        return mainPanel;
-    }
-
-    private JPanel createCenterPanel() {
-        JPanel panel = new JPanel(new BorderLayout(20, 0));
-        panel.setBackground(COL_BG);
-        panel.setBorder(new EmptyBorder(10, 25, 10, 25));
-
-        // --- Table ---
-        String[] cols = {"ID", "Arrival", "Burst", "Completed", "Waiting", "Turnaround"};
-        tableModel = new DefaultTableModel(cols, 0);
-        table = new JTable(tableModel) {
-            public boolean isCellEditable(int row, int column) { return false; }
-        };
-
-        // Minimalist Table Styling
-        table.setFont(FONT_UI);
-        table.setRowHeight(30);
-        table.setShowVerticalLines(false);
-        table.setGridColor(COL_BORDER);
-        table.setSelectionBackground(Color.BLACK);
-        table.setSelectionForeground(Color.WHITE);
-
-        JTableHeader header = table.getTableHeader();
-        header.setFont(FONT_BOLD);
-        header.setBackground(COL_BG);
-        header.setForeground(COL_FG);
-        header.setBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, Color.BLACK));
-
-        // Center text in table
-        DefaultTableCellRenderer centerRenderer = new DefaultTableCellRenderer();
-        centerRenderer.setHorizontalAlignment(JLabel.CENTER);
-        for(int i=0; i<table.getColumnCount(); i++) table.getColumnModel().getColumn(i).setCellRenderer(centerRenderer);
-
-        JScrollPane scroll = new JScrollPane(table);
-        scroll.getViewport().setBackground(COL_BG);
-        scroll.setBorder(new LineBorder(COL_BORDER));
-
-        // --- Stats Sidebar ---
-        JPanel statsContainer = new JPanel();
-        statsContainer.setLayout(new BoxLayout(statsContainer, BoxLayout.Y_AXIS));
-        statsContainer.setBackground(COL_BG);
-        statsContainer.setPreferredSize(new Dimension(200, 0));
-        statsContainer.setBorder(new EmptyBorder(0, 0, 0, 0));
-
-        lblAvgTurnaround = addStatBox(statsContainer, "Avg Turnaround");
-        statsContainer.add(Box.createVerticalStrut(15));
-        lblAvgWaiting = addStatBox(statsContainer, "Avg Waiting");
-        statsContainer.add(Box.createVerticalStrut(15));
-        lblThroughput = addStatBox(statsContainer, "Throughput");
-
-        panel.add(scroll, BorderLayout.CENTER);
-        panel.add(statsContainer, BorderLayout.EAST);
+        panel.add(styleLabel("ID:"));
+        panel.add(txtPid);
+        panel.add(styleLabel("Arrival:"));
+        panel.add(txtAt);
+        panel.add(styleLabel("Burst:"));
+        panel.add(txtBt);
+        panel.add(Box.createHorizontalStrut(10));
+        panel.add(btnAdd);
+        panel.add(btnRandom);
 
         return panel;
     }
 
     private JPanel createBottomPanel() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(COL_BG);
-        panel.setBorder(new EmptyBorder(10, 25, 25, 25));
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 25, 20));
+        panel.setBackground(BG_COLOR);
 
-        JLabel title = new JLabel("Gantt Chart Visualization");
-        title.setFont(FONT_BOLD);
-        title.setBorder(new EmptyBorder(0, 0, 10, 0));
+        String[] algos = {"First Come First Serve (FCFS)", "Round Robin (RR)"};
+        algoSelector = new JComboBox<>(algos);
+        algoSelector.setBackground(PANEL_COLOR);
+        algoSelector.setForeground(TEXT_COLOR);
+        algoSelector.setFont(MAIN_FONT);
 
-        ganttPanel = new GanttPanel();
-        ganttPanel.setPreferredSize(new Dimension(0, 100));
-        ganttPanel.setBackground(COL_BG);
-        ganttPanel.setBorder(new LineBorder(COL_FG, 1)); // Simple black border
+        lblQuantum = styleLabel("Time Quantum:");
+        txtQuantum = styleTextField(new JTextField("2", 5));
+        lblQuantum.setVisible(false);
+        txtQuantum.setVisible(false);
 
-        panel.add(title, BorderLayout.NORTH);
-        panel.add(ganttPanel, BorderLayout.CENTER);
+        algoSelector.addActionListener(e -> {
+            boolean isRR = algoSelector.getSelectedIndex() == 1;
+            lblQuantum.setVisible(isRR);
+            txtQuantum.setVisible(isRR);
+            panel.revalidate();
+            panel.repaint();
+        });
+
+        // Controls
+        btnRun = styleButton("Simulate");
+        btnRun.setBackground(new Color(0, 150, 0));
+        btnRun.addActionListener(e -> startSimulation());
+
+        btnStop = styleButton("Stop");
+        btnStop.setBackground(new Color(200, 100, 0));
+        btnStop.setEnabled(false);
+        btnStop.addActionListener(e -> stopSimulation());
+
+        btnReset = styleButton("Reset");
+        btnReset.setBackground(new Color(150, 50, 50));
+        btnReset.addActionListener(e -> reset());
+
+        panel.add(styleLabel("Algorithm:"));
+        panel.add(algoSelector);
+        panel.add(lblQuantum);
+        panel.add(txtQuantum);
+        panel.add(Box.createHorizontalStrut(20));
+        panel.add(btnRun);
+        panel.add(btnStop);
+        panel.add(btnReset);
 
         return panel;
     }
 
-    // --- Components Factory ---
+    private void createTable() {
+        String[] cols = {"PID", "Color", "Arrival", "Burst", "Progress", "Finish", "Turnaround", "Waiting"};
 
-    private JTextField createFlatField() {
-        JTextField tf = new JTextField();
-        tf.setFont(FONT_UI);
-        tf.setBackground(COL_LIGHT_GRAY);
-        tf.setBorder(BorderFactory.createEmptyBorder(5, 8, 5, 8)); // No border, just bg
-        return tf;
+        tableModel = new DefaultTableModel(cols, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) { return false; }
+        };
+
+        processTable = new JTable(tableModel);
+        processTable.setBackground(PANEL_COLOR);
+        processTable.setForeground(TEXT_COLOR);
+        processTable.setGridColor(Color.GRAY);
+        processTable.setRowHeight(30);
+        processTable.setFont(MAIN_FONT);
+
+        processTable.getTableHeader().setBackground(new Color(60, 60, 60));
+        processTable.getTableHeader().setForeground(TEXT_COLOR);
+        processTable.getTableHeader().setFont(HEADER_FONT);
+
+        // Custom Renderers
+        processTable.getColumnModel().getColumn(1).setCellRenderer(new ColorRenderer());
+        processTable.getColumnModel().getColumn(4).setCellRenderer(new ProgressRenderer());
+
+        DefaultTableCellRenderer centerRenderer = new DefaultTableCellRenderer();
+        centerRenderer.setHorizontalAlignment(JLabel.CENTER);
+        centerRenderer.setBackground(PANEL_COLOR);
+        centerRenderer.setForeground(TEXT_COLOR);
+
+        for(int i : new int[]{0, 2, 3, 5, 6, 7}) {
+            processTable.getColumnModel().getColumn(i).setCellRenderer(centerRenderer);
+        }
+
+        processTable.getColumnModel().getColumn(1).setMaxWidth(50);
     }
 
-    private JButton createDarkButton(String text) {
-        JButton btn = new JButton(text);
-        btn.setFont(FONT_BOLD);
-        btn.setBackground(Color.BLACK);
-        btn.setForeground(Color.WHITE);
-        btn.setFocusPainted(false);
-        btn.setBorder(new EmptyBorder(10, 20, 10, 20));
-        btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        return btn;
+    // --- Logic & Simulation ---
+
+    private Color generateRandomColor() {
+        float hue = (float) Math.random();
+        return Color.getHSBColor(hue, 0.75f, 0.9f);
     }
-
-    private JLabel addStatBox(JPanel container, String title) {
-        JLabel header = new JLabel(title);
-        header.setFont(FONT_UI);
-        header.setForeground(Color.GRAY);
-
-        JLabel value = new JLabel("0.00");
-        value.setFont(new Font("Segoe UI", Font.BOLD, 22));
-        value.setForeground(COL_FG);
-
-        JPanel p = new JPanel(new BorderLayout());
-        p.setBackground(COL_BG);
-        p.add(header, BorderLayout.NORTH);
-        p.add(value, BorderLayout.CENTER);
-        p.setMaximumSize(new Dimension(200, 60));
-
-        container.add(p);
-        return value;
-    }
-
-    // --- Logic & Algorithms ---
 
     private void addProcess() {
         try {
-            String pid = tfProcessId.getText();
-            int arr = Integer.parseInt(tfArrivalTime.getText());
-            int burst = Integer.parseInt(tfBurstTime.getText());
+            String pid = txtPid.getText();
+            int at = Integer.parseInt(txtAt.getText());
+            int bt = Integer.parseInt(txtBt.getText());
 
-            if (pid.isEmpty()) throw new Exception();
+            if (bt <= 0) {
+                JOptionPane.showMessageDialog(this, "Burst Time must be > 0");
+                return;
+            }
 
-            processList.add(new Process(pid, arr, burst));
-            tableModel.addRow(new Object[]{pid, arr, burst, "-", "-", "-"});
+            processList.add(new Process(pid, at, bt, generateRandomColor()));
+            updateTableData();
 
-            tfProcessId.setText("");
-            tfArrivalTime.setText("");
-            tfBurstTime.setText("");
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "Invalid Input", "Error", JOptionPane.ERROR_MESSAGE);
+            processCounter++;
+            txtPid.setText("P" + processCounter);
+            txtAt.setText("");
+            txtBt.setText("");
+            txtAt.requestFocus();
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "Invalid numbers.");
         }
     }
 
-    private void calculateSchedule() {
+    private void randomizeProcesses() {
+        if(processList.isEmpty()) {
+            for(int i=0; i<5; i++) {
+                processList.add(new Process("P"+(processCounter++), 0, 0, generateRandomColor()));
+            }
+        }
+
+        Random rand = new Random();
+        for(Process p : processList) {
+            p.arrivalTime = rand.nextInt(10);
+            p.burstTime = rand.nextInt(10) + 1;
+            p.color = generateRandomColor();
+        }
+        updateTableData();
+        txtPid.setText("P" + processCounter);
+    }
+
+    private void updateTableData() {
+        tableModel.setRowCount(0);
+        for (Process p : processList) {
+            tableModel.addRow(new Object[]{
+                    p.pid,
+                    p.color,
+                    p.arrivalTime,
+                    p.burstTime,
+                    p.executedTime,
+                    "-", "-", "-"
+            });
+        }
+    }
+
+    private void reset() {
+        stopSimulation();
+        processList.clear();
+        simulationTimeline.clear();
+        tableModel.setRowCount(0);
+        currentSimTime = 0;
+        processCounter = 1;
+        txtPid.setText("P1");
+        ganttPanel.repaint();
+        toggleInputControls(true);
+    }
+
+    // --- ANIMATION CONTROLS ---
+
+    private void startSimulation() {
         if (processList.isEmpty()) return;
 
-        // Reset
+        // 1. Reset Internal State
         for(Process p : processList) p.reset();
-        List<GanttBlock> blocks = new ArrayList<>();
+        simulationTimeline.clear();
+        currentSimTime = 0;
+        updateTableData();
 
-        String algo = (String) cbAlgorithm.getSelectedItem();
+        // 2. Pre-calculate Logic
+        ArrayList<Process> sortedList = new ArrayList<>(processList);
+        sortedList.sort(Comparator.comparingInt(p -> p.arrivalTime));
 
-        if ("First Come First Served".equals(algo)) {
-            runFCFS(blocks);
+        if (algoSelector.getSelectedIndex() == 0) {
+            calculateFCFS(sortedList);
         } else {
             try {
-                int q = Integer.parseInt(tfQuantum.getText());
-                if (q < 1) throw new Exception();
-                runRR(q, blocks);
-            } catch (Exception e) {
-                JOptionPane.showMessageDialog(this, "Invalid Quantum", "Error", JOptionPane.ERROR_MESSAGE);
+                int q = Integer.parseInt(txtQuantum.getText());
+                calculateRR(sortedList, q);
+            } catch (NumberFormatException e) {
+                JOptionPane.showMessageDialog(this, "Invalid Quantum");
                 return;
             }
         }
 
-        updateResults(blocks);
+        // 3. Start Animation
+        totalSimTime = simulationTimeline.size();
+
+        if(animationTimer != null && animationTimer.isRunning()) animationTimer.stop();
+
+        toggleInputControls(false); // LOCK UI
+        btnStop.setEnabled(true);
+
+        animationTimer = new Timer(300, e -> {
+            if (currentSimTime < totalSimTime) {
+                stepAnimation();
+            } else {
+                stopSimulation();
+                finalizeTable();
+            }
+        });
+        animationTimer.start();
     }
 
-    private void runFCFS(List<GanttBlock> blocks) {
-        processList.sort(Comparator.comparingInt(p -> p.arrivalTime));
+    private void stopSimulation() {
+        if(animationTimer != null) {
+            animationTimer.stop();
+        }
+        toggleInputControls(true); // UNLOCK UI
+        btnStop.setEnabled(false);
+    }
+
+    private void toggleInputControls(boolean enable) {
+        btnAdd.setEnabled(enable);
+        btnRandom.setEnabled(enable);
+        btnReset.setEnabled(enable);
+        btnRun.setEnabled(enable);
+
+        txtPid.setEnabled(enable);
+        txtAt.setEnabled(enable);
+        txtBt.setEnabled(enable);
+        txtQuantum.setEnabled(enable);
+        algoSelector.setEnabled(enable);
+    }
+
+    private void stepAnimation() {
+        ExecutionStep step = simulationTimeline.get(currentSimTime);
+        currentSimTime++;
+
+        if (!step.pid.equals("IDLE")) {
+            for (int i = 0; i < processList.size(); i++) {
+                Process p = processList.get(i);
+                if (p.pid.equals(step.pid)) {
+                    p.executedTime++;
+                    tableModel.setValueAt(p.executedTime, i, 4);
+                    break;
+                }
+            }
+        }
+        ganttPanel.repaint();
+    }
+
+    private void finalizeTable() {
+        for (int i=0; i<processList.size(); i++) {
+            Process p = processList.get(i);
+            p.executedTime = p.burstTime;
+
+            tableModel.setValueAt(p.executedTime, i, 4);
+            tableModel.setValueAt(p.completionTime, i, 5);
+            tableModel.setValueAt(p.turnAroundTime, i, 6);
+            tableModel.setValueAt(p.waitingTime, i, 7);
+        }
+        tableModel.fireTableDataChanged();
+        processTable.repaint();
+    }
+
+    // --- Logic Generators ---
+
+    private void calculateFCFS(ArrayList<Process> sortedList) {
         int time = 0;
-
-        for (Process p : processList) {
-            if (time < p.arrivalTime) time = p.arrivalTime; // Idle handling
-
-            int start = time;
-            time += p.burstTime;
-            int end = time;
-
-            p.completionTime = end;
-            p.turnaroundTime = p.completionTime - p.arrivalTime;
-            p.waitingTime = p.turnaroundTime - p.burstTime;
-
-            blocks.add(new GanttBlock(p.pid, start, end));
+        for (Process p : sortedList) {
+            while (time < p.arrivalTime) {
+                simulationTimeline.add(new ExecutionStep("IDLE", time, Color.GRAY));
+                time++;
+            }
+            for (int i = 0; i < p.burstTime; i++) {
+                simulationTimeline.add(new ExecutionStep(p.pid, time, p.color));
+                time++;
+            }
+            p.completionTime = time;
+            p.turnAroundTime = p.completionTime - p.arrivalTime;
+            p.waitingTime = p.turnAroundTime - p.burstTime;
         }
     }
 
-    private void runRR(int quantum, List<GanttBlock> blocks) {
-        processList.sort(Comparator.comparingInt(p -> p.arrivalTime));
-        Queue<Process> queue = new LinkedList<>();
+    private void calculateRR(ArrayList<Process> sortedList, int quantum) {
         int time = 0;
         int completed = 0;
-        int n = processList.size();
-        int index = 0;
+        int n = sortedList.size();
+        Queue<Process> queue = new LinkedList<>();
+        Set<Process> inQueue = new HashSet<>();
 
-        // Push initial processes
-        if(n > 0) {
-            // Jump to first arrival if needed
-            if(processList.get(0).arrivalTime > time) time = processList.get(0).arrivalTime;
-            while(index < n && processList.get(index).arrivalTime <= time) {
-                queue.add(processList.get(index));
-                index++;
-            }
+        int i = 0;
+        while(i < n && sortedList.get(i).arrivalTime <= time) {
+            queue.add(sortedList.get(i));
+            inQueue.add(sortedList.get(i));
+            i++;
         }
 
         while(completed < n) {
             if(queue.isEmpty()) {
-                if(index < n) {
-                    time = processList.get(index).arrivalTime;
-                    while(index < n && processList.get(index).arrivalTime <= time) {
-                        queue.add(processList.get(index));
-                        index++;
-                    }
-                } else break;
+                simulationTimeline.add(new ExecutionStep("IDLE", time, Color.GRAY));
+                time++;
+                while(i < n && sortedList.get(i).arrivalTime <= time) {
+                    queue.add(sortedList.get(i));
+                    inQueue.add(sortedList.get(i));
+                    i++;
+                }
+                continue;
             }
 
             Process p = queue.poll();
-            int start = time;
-            int slice = Math.min(p.remainingTime, quantum);
+            inQueue.remove(p);
 
-            p.remainingTime -= slice;
-            time += slice;
-
-            blocks.add(new GanttBlock(p.pid, start, time));
-
-            // Add newly arrived processes
-            while(index < n && processList.get(index).arrivalTime <= time) {
-                queue.add(processList.get(index));
-                index++;
+            int exec = Math.min(p.remainingTime, quantum);
+            for(int k=0; k<exec; k++) {
+                simulationTimeline.add(new ExecutionStep(p.pid, time, p.color));
+                time++;
+                p.remainingTime--;
+                while(i < n && sortedList.get(i).arrivalTime <= time) {
+                    if(!inQueue.contains(sortedList.get(i)) && sortedList.get(i).remainingTime > 0){
+                        queue.add(sortedList.get(i));
+                        inQueue.add(sortedList.get(i));
+                    }
+                    i++;
+                }
             }
 
             if(p.remainingTime > 0) {
                 queue.add(p);
+                inQueue.add(p);
             } else {
                 completed++;
                 p.completionTime = time;
-                p.turnaroundTime = p.completionTime - p.arrivalTime;
-                p.waitingTime = p.turnaroundTime - p.burstTime;
+                p.turnAroundTime = p.completionTime - p.arrivalTime;
+                p.waitingTime = p.turnAroundTime - p.burstTime;
             }
         }
     }
 
-    private void updateResults(List<GanttBlock> blocks) {
-        tableModel.setRowCount(0);
-        double totalWait = 0, totalTurn = 0;
-        int maxTime = 0;
+    // --- Custom Renderers ---
 
-        for(Process p : processList) {
-            tableModel.addRow(new Object[]{p.pid, p.arrivalTime, p.burstTime, p.completionTime, p.waitingTime, p.turnaroundTime});
-            totalWait += p.waitingTime;
-            totalTurn += p.turnaroundTime;
-            maxTime = Math.max(maxTime, p.completionTime);
+    class ColorRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+            Component c = super.getTableCellRendererComponent(table, "", isSelected, hasFocus, row, column);
+            c.setBackground((Color) value);
+            return c;
         }
-
-        lblAvgTurnaround.setText(String.format("%.2f", totalTurn / processList.size()));
-        lblAvgWaiting.setText(String.format("%.2f", totalWait / processList.size()));
-        lblThroughput.setText(String.format("%.4f", (double)processList.size() / maxTime));
-
-        ganttPanel.updateData(blocks, maxTime);
     }
 
-    // --- Custom Gantt Panel ---
-    class GanttPanel extends JPanel {
-        private List<GanttBlock> blocks;
-        private int totalTime;
+    class ProgressRenderer extends JProgressBar implements TableCellRenderer {
+        public ProgressRenderer() {
+            super(0, 100);
+            setStringPainted(true);
+            setBackground(PANEL_COLOR);
+            setForeground(new Color(0, 180, 0));
+        }
 
-        public void updateData(List<GanttBlock> blocks, int totalTime) {
-            this.blocks = blocks;
-            this.totalTime = totalTime;
-            repaint();
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+            if (value == null) return this;
+
+            int executed = (int) value;
+            Process p = processList.get(row);
+            int total = p.burstTime;
+
+            setValue(executed);
+            setMaximum(total);
+            setString(executed + " / " + total);
+
+            if (executed >= total) {
+                setValue(total);
+            }
+            return this;
+        }
+    }
+
+    // --- Styling Helpers ---
+    private JLabel styleLabel(String text) {
+        JLabel l = new JLabel(text);
+        l.setForeground(TEXT_COLOR);
+        l.setFont(MAIN_FONT);
+        return l;
+    }
+
+    private JTextField styleTextField(JTextField tf) {
+        tf.setBackground(PANEL_COLOR);
+        tf.setForeground(Color.WHITE);
+        tf.setCaretColor(Color.WHITE);
+        tf.setBorder(BorderFactory.createLineBorder(Color.GRAY));
+        tf.setFont(MAIN_FONT);
+        return tf;
+    }
+
+    private JButton styleButton(String text) {
+        JButton b = new JButton(text);
+        b.setBackground(new Color(70, 130, 180));
+        b.setForeground(Color.WHITE);
+        b.setFocusPainted(false);
+        b.setBorderPainted(false);
+        b.setFont(MAIN_FONT);
+        return b;
+    }
+
+    // --- Gantt Chart Panel ---
+    private class GanttPanel extends JPanel {
+        public GanttPanel() {
+            setBackground(BG_COLOR);
+            setBorder(BorderFactory.createTitledBorder(
+                    BorderFactory.createLineBorder(TEXT_COLOR), "Gantt Chart (Real Time)", 0, 0, HEADER_FONT, TEXT_COLOR));
         }
 
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
-            if (blocks == null || blocks.isEmpty()) return;
+            if (simulationTimeline.isEmpty() || currentSimTime == 0) return;
 
             Graphics2D g2 = (Graphics2D) g;
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setFont(MAIN_FONT);
 
-            int w = getWidth() - 50;
-            int h = getHeight();
-            int startX = 25;
-            int barY = 30;
-            int barH = 40;
+            int startX = 20;
+            int y = 60;
+            int h = 50;
 
-            // Scale calculations
-            double unitWidth = (double) w / totalTime;
+            int panelWidth = getWidth() - 50;
+            double scale = (double) panelWidth / (simulationTimeline.size() + 2);
 
-            for (GanttBlock b : blocks) {
-                int x = startX + (int)(b.start * unitWidth);
-                int bw = (int)((b.end - b.start) * unitWidth);
+            for (int i = 0; i < currentSimTime; i++) {
+                ExecutionStep step = simulationTimeline.get(i);
 
-                // Draw Block
-                g2.setColor(Color.WHITE);
-                g2.fillRect(x, barY, bw, barH);
-                g2.setColor(Color.BLACK);
-                g2.drawRect(x, barY, bw, barH);
+                int x = startX + (int) (i * scale);
+                int width = (int) scale + 1;
 
-                // Center PID Text
-                String label = b.pid;
-                FontMetrics fm = g2.getFontMetrics();
-                int textX = x + (bw - fm.stringWidth(label)) / 2;
-                int textY = barY + (barH + fm.getAscent()) / 2 - 3;
+                g2.setColor(step.color);
+                g2.fillRect(x, y, width, h);
+                g2.setColor(BG_COLOR);
+                g2.drawRect(x, y, width, h);
 
-                // Clip text if block is too small
-                if(bw > fm.stringWidth(label)) {
-                    g2.drawString(label, textX, textY);
+                if (!step.pid.equals("IDLE")) {
+                    boolean isStartOfBlock = (i == 0) || !simulationTimeline.get(i-1).pid.equals(step.pid);
+                    if (isStartOfBlock) {
+                        g2.setColor(Color.WHITE);
+                        g2.drawString(step.pid, x + 2, y - 5);
+                    }
                 }
-
-                // Draw Time Markers (Detailed)
-                // Draw start time at bottom left of block
-                g2.setFont(new Font("Segoe UI", Font.PLAIN, 10));
-                g2.drawString(String.valueOf(b.start), x - 2, barY + barH + 15);
             }
 
-            // Draw final end time
-            int finalX = startX + (int)(totalTime * unitWidth);
-            g2.drawString(String.valueOf(totalTime), finalX - 3, barY + barH + 15);
+            g2.setColor(Color.GRAY);
+            g2.drawLine(startX, y+h+5, startX + (int)(simulationTimeline.size()*scale), y+h+5);
+            g2.drawString("0", startX, y+h+20);
+            String currentStr = String.valueOf(currentSimTime);
+            int curX = startX + (int)(currentSimTime * scale);
+            g2.drawString(currentStr, curX, y+h+20);
         }
     }
 
-    // --- Data Classes ---
-    class Process {
-        String pid;
-        int arrivalTime, burstTime, remainingTime;
-        int completionTime, waitingTime, turnaroundTime;
-
-        Process(String id, int arr, int burst) {
-            this.pid = id; this.arrivalTime = arr; this.burstTime = burst;
-            reset();
-        }
-        void reset() { remainingTime = burstTime; completionTime=0; waitingTime=0; turnaroundTime=0; }
-    }
-
-    class GanttBlock {
-        String pid; int start, end;
-        GanttBlock(String p, int s, int e) { pid = p; start = s; end = e; }
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> new TaskScheduler().setVisible(true));
     }
 }
